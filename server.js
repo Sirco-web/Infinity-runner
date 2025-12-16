@@ -35,6 +35,8 @@ const octokit = new Octokit({
 
 const README_PATH = 'README.md';
 const ALL_NUMBERS_PATH = 'all.json';
+const CHUNK_SIZE = 50000; // Numbers per chunk file
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB GitHub limit
 
 // State management
 let currentNumbers = [];
@@ -44,6 +46,8 @@ let a = 0n; // Using BigInt for large Fibonacci numbers
 let b = 1n;
 let isSaving = false; // Flag to track if save is in progress
 let pendingSave = false; // Flag to track if a save is queued
+let saveQueue = []; // Queue for save operations
+let isProcessingQueue = false;
 let serverStartTime = new Date();
 let lastSaveTime = new Date();
 let lastCommitTime = 0;
@@ -94,6 +98,44 @@ async function checkRepositoryExists() {
   }
 }
 
+// Load chunked data from multiple files
+async function loadChunkedData(indexData) {
+  const numChunks = indexData.chunks;
+  allNumbers = [];
+  
+  console.log(`Loading ${numChunks} chunk files...`);
+  
+  for (let i = 0; i < numChunks; i++) {
+    const chunkPath = `chunks/chunk_${String(i + 1).padStart(4, '0')}.json`;
+    
+    try {
+      const { data } = await octokit.repos.getContent({
+        owner: REPO_OWNER,
+        repo: REPO_NAME,
+        path: chunkPath,
+      });
+      const content = Buffer.from(data.content, 'base64').toString('utf8');
+      const chunkData = JSON.parse(content);
+      allNumbers.push(...chunkData.numbers);
+      console.log(`Loaded chunk ${i + 1}/${numChunks}`);
+    } catch (error) {
+      console.error(`Error loading chunk ${i + 1}:`, error.message);
+      break;
+    }
+  }
+  
+  count = indexData.count || allNumbers.length;
+  
+  if (allNumbers.length >= 2) {
+    const lastTwo = allNumbers.slice(-2);
+    a = BigInt(lastTwo[0]);
+    b = BigInt(lastTwo[1]);
+    currentNumbers = allNumbers.slice(-45);
+    console.log(`Loaded ${allNumbers.length} numbers from ${numChunks} chunks`);
+    console.log(`Resuming from position ${count}`);
+  }
+}
+
 // Load state from GitHub
 async function loadStateFromGitHub() {
   if (!githubAvailable) {
@@ -110,6 +152,14 @@ async function loadStateFromGitHub() {
     });
     const content = Buffer.from(data.content, 'base64').toString('utf8');
     const parsed = JSON.parse(content);
+    
+    // Check if data is chunked
+    if (parsed.chunks && !parsed.numbers) {
+      console.log(`Found chunked data: ${parsed.chunks} chunks, loading...`);
+      await loadChunkedData(parsed);
+      return;
+    }
+    
     allNumbers = parsed.numbers || [];
     count = parsed.count || allNumbers.length;
     
@@ -254,35 +304,9 @@ This is an automated computation running a Fibonacci sequence. The server comput
 
     console.log(`Saved README to GitHub: ${saveCount} numbers`);
 
-    // Save all.json with complete history
-    const allNumbersData = {
-      count: saveCount,
-      lastUpdated: new Date().toISOString(),
-      numbers: allNumbers
-    };
+    // Queue the all.json save to run async without blocking
+    queueAllNumbersSave(saveCount);
     
-    let allJsonSha;
-    try {
-      const { data } = await octokit.repos.getContent({
-        owner: REPO_OWNER,
-        repo: REPO_NAME,
-        path: ALL_NUMBERS_PATH,
-      });
-      allJsonSha = data.sha;
-    } catch (error) {
-      if (error.status !== 404) throw error;
-    }
-
-    await octokit.repos.createOrUpdateFileContents({
-      owner: REPO_OWNER,
-      repo: REPO_NAME,
-      path: ALL_NUMBERS_PATH,
-      message: `Update all numbers: ${saveCount} total`,
-      content: Buffer.from(JSON.stringify(allNumbersData, null, 2)).toString('base64'),
-      ...(allJsonSha && { sha: allJsonSha }),
-    });
-
-    console.log(`Saved all.json to GitHub: ${allNumbers.length} numbers`);
     lastSaveTime = new Date();
     
     // Notify all clients about the save
@@ -303,6 +327,162 @@ This is an automated computation running a Fibonacci sequence. The server comput
       setImmediate(() => saveStateToGitHub());
     }
   }
+}
+
+// Queue all.json save operation
+function queueAllNumbersSave(saveCount) {
+  const numbersSnapshot = [...allNumbers];
+  saveQueue.push({ count: saveCount, numbers: numbersSnapshot });
+  processQueue();
+}
+
+// Process save queue without blocking computation
+async function processQueue() {
+  if (isProcessingQueue || saveQueue.length === 0) return;
+  
+  isProcessingQueue = true;
+  
+  while (saveQueue.length > 0) {
+    // Only process the latest save, skip older ones
+    const job = saveQueue.pop();
+    saveQueue.length = 0; // Clear remaining older jobs
+    
+    try {
+      await saveAllNumbersToGitHub(job.count, job.numbers);
+    } catch (error) {
+      console.error('Queue save error:', error.message);
+    }
+    
+    // Small delay to not hammer GitHub API
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  
+  isProcessingQueue = false;
+}
+
+// Save all numbers, chunking if too large
+async function saveAllNumbersToGitHub(saveCount, numbers) {
+  const allNumbersData = {
+    count: saveCount,
+    lastUpdated: new Date().toISOString(),
+    totalNumbers: numbers.length,
+    numbers: numbers
+  };
+  
+  const jsonContent = JSON.stringify(allNumbersData, null, 2);
+  const contentSize = Buffer.byteLength(jsonContent, 'utf8');
+  
+  // If file is too large, save in chunks
+  if (contentSize > MAX_FILE_SIZE) {
+    console.log(`all.json too large (${(contentSize / 1024 / 1024).toFixed(2)}MB), saving in chunks...`);
+    await saveInChunks(saveCount, numbers);
+  } else {
+    // Save as single file
+    let allJsonSha;
+    try {
+      const { data } = await octokit.repos.getContent({
+        owner: REPO_OWNER,
+        repo: REPO_NAME,
+        path: ALL_NUMBERS_PATH,
+      });
+      allJsonSha = data.sha;
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+
+    await octokit.repos.createOrUpdateFileContents({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      path: ALL_NUMBERS_PATH,
+      message: `Update all numbers: ${saveCount} total`,
+      content: Buffer.from(jsonContent).toString('base64'),
+      ...(allJsonSha && { sha: allJsonSha }),
+    });
+
+    console.log(`Saved all.json to GitHub: ${numbers.length} numbers`);
+  }
+}
+
+// Save numbers in chunk files when too large
+async function saveInChunks(saveCount, numbers) {
+  const numChunks = Math.ceil(numbers.length / CHUNK_SIZE);
+  
+  // Save index file
+  const indexData = {
+    count: saveCount,
+    lastUpdated: new Date().toISOString(),
+    totalNumbers: numbers.length,
+    chunks: numChunks,
+    chunkSize: CHUNK_SIZE
+  };
+  
+  let indexSha;
+  try {
+    const { data } = await octokit.repos.getContent({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      path: ALL_NUMBERS_PATH,
+    });
+    indexSha = data.sha;
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+
+  await octokit.repos.createOrUpdateFileContents({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    path: ALL_NUMBERS_PATH,
+    message: `Update index: ${saveCount} numbers in ${numChunks} chunks`,
+    content: Buffer.from(JSON.stringify(indexData, null, 2)).toString('base64'),
+    ...(indexSha && { sha: indexSha }),
+  });
+  
+  console.log(`Saved index file, now saving ${numChunks} chunks...`);
+
+  // Save each chunk
+  for (let i = 0; i < numChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min((i + 1) * CHUNK_SIZE, numbers.length);
+    const chunkNumbers = numbers.slice(start, end);
+    
+    const chunkData = {
+      chunk: i + 1,
+      totalChunks: numChunks,
+      startIndex: start,
+      endIndex: end - 1,
+      numbers: chunkNumbers
+    };
+    
+    const chunkPath = `chunks/chunk_${String(i + 1).padStart(4, '0')}.json`;
+    
+    let chunkSha;
+    try {
+      const { data } = await octokit.repos.getContent({
+        owner: REPO_OWNER,
+        repo: REPO_NAME,
+        path: chunkPath,
+      });
+      chunkSha = data.sha;
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+
+    await octokit.repos.createOrUpdateFileContents({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      path: chunkPath,
+      message: `Update chunk ${i + 1}/${numChunks}`,
+      content: Buffer.from(JSON.stringify(chunkData)).toString('base64'),
+      ...(chunkSha && { sha: chunkSha }),
+    });
+    
+    console.log(`Saved chunk ${i + 1}/${numChunks}`);
+    
+    // Small delay between chunks to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  console.log(`All ${numChunks} chunks saved successfully`);
 }
 
 // Compute next Fibonacci number
@@ -344,15 +524,15 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Periodic save function (every 10 minutes)
+// Periodic save function (every 5 minutes)
 function startPeriodicSave() {
   setInterval(() => {
     if (count > 0) {
-      console.log(`Periodic save triggered (10 minutes elapsed, ${count} numbers computed)`);
+      console.log(`Periodic save triggered (5 minutes elapsed, ${count} numbers computed)`);
       // Queue the save - it won't block computation
       saveStateToGitHub();
     }
-  }, 10 * 60 * 1000); // 10 minutes in milliseconds
+  }, 5 * 60 * 1000); // 5 minutes in milliseconds
 }
 
 // Main computation loop

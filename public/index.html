@@ -181,13 +181,15 @@
             border-radius: 10px;
             margin-top: 20px;
             position: relative;
-            overflow: hidden;
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .current-number {
-            font-size: 1.3em;
+            font-size: 1.1em;
             word-break: break-all;
-            line-height: 1.8;
+            line-height: 1.6;
             font-family: 'Monaco', 'Courier New', monospace;
             animation: pulse 0.3s ease-in-out;
         }
@@ -203,6 +205,25 @@
             opacity: 0.7;
             margin-top: 15px;
             text-align: center;
+        }
+
+        /* Scrollbar for current number display */
+        .current-number-display::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .current-number-display::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .current-number-display::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .current-number-display::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
         }
 
         /* How It Works Section */
@@ -258,12 +279,13 @@
 
         /* History Section */
         .history-container {
-            max-height: 400px;
-            overflow-y: auto;
+            height: 350px;
+            overflow-y: scroll;
             background: rgba(0, 0, 0, 0.2);
             padding: 20px;
             border-radius: 10px;
             margin-top: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .history-item {
@@ -434,7 +456,7 @@
             </div>
             <div class="stat-card">
                 <div class="stat-label">Next Save In</div>
-                <div class="stat-value" id="nextSave">10m</div>
+                <div class="stat-value" id="nextSave">5m</div>
             </div>
         </div>
 
@@ -488,7 +510,7 @@
                     </li>
                     <li>
                         <span class="label">Save Interval</span>
-                        <span class="value">Every 10 minutes</span>
+                        <span class="value">Every 5 minutes</span>
                     </li>
                     <li>
                         <span class="label">Server Started</span>
@@ -676,7 +698,7 @@
                 // Update next save time
                 if (lastSaveTime) {
                     const timeSinceLastSave = now - lastSaveTime;
-                    const nextSaveIn = Math.max(0, 10 * 60 * 1000 - timeSinceLastSave);
+                    const nextSaveIn = Math.max(0, 5 * 60 * 1000 - timeSinceLastSave);
                     const minutesUntilSave = Math.ceil(nextSaveIn / 60000);
                     nextSaveEl.textContent = `${minutesUntilSave}m`;
                 }
