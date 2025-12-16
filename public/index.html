@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinity Runner - Live Fibonacci Computation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+        }
+
+        h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .subtitle {
+            font-size: 1.3em;
+            opacity: 0.95;
+            margin-bottom: 15px;
+        }
+
+        .connection-status {
+            display: inline-block;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            margin-top: 10px;
+        }
+
+        .connected {
+            background: #10b981;
+        }
+
+        .disconnected {
+            background: #ef4444;
+        }
+
+        /* Main Grid Layout */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Cards */
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .card h2 {
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card h3 {
+            font-size: 1.3em;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            color: #ffd700;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        /* Current Number Display */
+        .current-number-display {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 25px;
+            border-radius: 10px;
+            margin-top: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .current-number {
+            font-size: 1.3em;
+            word-break: break-all;
+            line-height: 1.8;
+            font-family: 'Monaco', 'Courier New', monospace;
+            animation: pulse 0.3s ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.01); }
+            100% { transform: scale(1); }
+        }
+
+        .number-info {
+            font-size: 0.9em;
+            opacity: 0.7;
+            margin-top: 15px;
+            text-align: center;
+        }
+
+        /* How It Works Section */
+        .info-text {
+            font-size: 1.05em;
+            line-height: 1.8;
+            opacity: 0.95;
+        }
+
+        .info-text p {
+            margin-bottom: 15px;
+        }
+
+        .formula {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 1.2em;
+        }
+
+        .highlight {
+            color: #ffd700;
+            font-weight: bold;
+        }
+
+        /* Specs List */
+        .specs-list {
+            list-style: none;
+            margin-top: 15px;
+        }
+
+        .specs-list li {
+            padding: 12px;
+            margin-bottom: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .specs-list .label {
+            opacity: 0.8;
+        }
+
+        .specs-list .value {
+            color: #ffd700;
+            font-weight: bold;
+        }
+
+        /* History Section */
+        .history-container {
+            max-height: 400px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .history-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+            word-break: break-all;
+            font-size: 0.9em;
+            font-family: 'Monaco', 'Courier New', monospace;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .history-item .position {
+            color: #ffd700;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        /* Full Width Section */
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        /* Scrollbar Styling */
+        .history-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .history-container::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .history-container::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .history-container::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            opacity: 0.8;
+            font-size: 0.9em;
+        }
+
+        /* Save Indicator */
+        .save-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(16, 185, 129, 0.9);
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+
+        .save-indicator.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>
+                <span>🚀</span>
+                Infinity Runner
+                <span>∞</span>
+            </h1>
+            <p class="subtitle">Real-time Fibonacci Sequence Computation Engine</p>
+            <div class="connection-status disconnected" id="status">Connecting...</div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Numbers Computed</div>
+                <div class="stat-value" id="count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Current Digits</div>
+                <div class="stat-value" id="digits">1</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Server Uptime</div>
+                <div class="stat-value" id="uptime">0m</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Next Save In</div>
+                <div class="stat-value" id="nextSave">10m</div>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <div class="card">
+                <h2>📊 Live Computation</h2>
+                <div class="current-number-display">
+                    <div class="current-number" id="currentNumber">Initializing...</div>
+                    <div class="number-info" id="numberInfo">Connecting to server...</div>
+                </div>
+                
+                <h3>Recent Numbers</h3>
+                <div class="history-container" id="history">
+                    <p style="opacity: 0.5; text-align: center;">Waiting for data...</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>🧮 How It Works</h2>
+                <div class="info-text">
+                    <p>The <span class="highlight">Fibonacci sequence</span> is a series of numbers where each number is the sum of the two preceding ones. It starts with 0 and 1.</p>
+                    
+                    <div class="formula">
+                        F(n) = F(n-1) + F(n-2)
+                    </div>
+                    
+                    <p><strong>Example:</strong> 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89...</p>
+                    
+                    <p>This server continuously computes the next number in the sequence every <span class="highlight">100 milliseconds</span> using JavaScript's BigInt for unlimited precision.</p>
+                    
+                    <p>The sequence appears in nature (spiral patterns, flower petals), architecture, and art. It's related to the golden ratio (φ ≈ 1.618).</p>
+                </div>
+
+                <h3>⚙️ Server Specifications</h3>
+                <ul class="specs-list">
+                    <li>
+                        <span class="label">Platform</span>
+                        <span class="value" id="platform">Loading...</span>
+                    </li>
+                    <li>
+                        <span class="label">RAM</span>
+                        <span class="value" id="ram">Loading...</span>
+                    </li>
+                    <li>
+                        <span class="label">CPU</span>
+                        <span class="value" id="cpu">Loading...</span>
+                    </li>
+                    <li>
+                        <span class="label">Computation Rate</span>
+                        <span class="value">10 numbers/second</span>
+                    </li>
+                    <li>
+                        <span class="label">Save Interval</span>
+                        <span class="value">Every 10 minutes</span>
+                    </li>
+                    <li>
+                        <span class="label">Server Started</span>
+                        <span class="value" id="serverStart">Loading...</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>💾 Progress is automatically saved to GitHub every 10 minutes</p>
+            <p>🔄 Server will resume from the last saved position on restart</p>
+        </div>
+    </div>
+
+    <div class="save-indicator" id="saveIndicator">
+        ✓ Saved to GitHub
+    </div>
+
+    <script>
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+        const statusEl = document.getElementById('status');
+        const countEl = document.getElementById('count');
+        const digitsEl = document.getElementById('digits');
+        const uptimeEl = document.getElementById('uptime');
+        const nextSaveEl = document.getElementById('nextSave');
+        const currentNumberEl = document.getElementById('currentNumber');
+        const numberInfoEl = document.getElementById('numberInfo');
+        const historyEl = document.getElementById('history');
+        const platformEl = document.getElementById('platform');
+        const ramEl = document.getElementById('ram');
+        const cpuEl = document.getElementById('cpu');
+        const serverStartEl = document.getElementById('serverStart');
+        const saveIndicatorEl = document.getElementById('saveIndicator');
+
+        let count = 0;
+        let history = [];
+        let serverStartTime = null;
+        let lastSaveTime = null;
+        let uptimeInterval = null;
+
+        ws.onopen = () => {
+            console.log('Connected to server');
+            statusEl.textContent = '● Connected';
+            statusEl.className = 'connection-status connected';
+        };
+
+        ws.onclose = () => {
+            console.log('Disconnected from server');
+            statusEl.textContent = '● Disconnected';
+            statusEl.className = 'connection-status disconnected';
+            if (uptimeInterval) clearInterval(uptimeInterval);
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'init') {
+                count = data.count;
+                history = data.last45 || [];
+                serverStartTime = new Date(data.serverStartTime);
+                lastSaveTime = new Date(data.lastSaveTime);
+                
+                // Update server specs
+                if (data.serverSpecs) {
+                    platformEl.textContent = data.serverSpecs.platform;
+                    ramEl.textContent = data.serverSpecs.ram;
+                    cpuEl.textContent = data.serverSpecs.cpu;
+                }
+                
+                serverStartEl.textContent = formatDateTime(serverStartTime);
+                
+                updateDisplay(data.currentNumber, count);
+                renderHistory();
+                startUptimeCounter();
+            } else if (data.type === 'number') {
+                count = data.position;
+                history.push(data.number);
+                if (history.length > 45) {
+                    history.shift();
+                }
+                updateDisplay(data.number, count);
+                renderHistory();
+            } else if (data.type === 'save') {
+                lastSaveTime = new Date(data.lastSaveTime);
+                showSaveIndicator();
+            }
+        };
+
+        function updateDisplay(number, position) {
+            currentNumberEl.textContent = number;
+            currentNumberEl.style.animation = 'none';
+            setTimeout(() => {
+                currentNumberEl.style.animation = 'pulse 0.3s ease-in-out';
+            }, 10);
+            
+            countEl.textContent = position.toLocaleString();
+            digitsEl.textContent = number.length.toLocaleString();
+            
+            numberInfoEl.textContent = `Position #${position.toLocaleString()} • ${number.length.toLocaleString()} digits`;
+        }
+
+        function renderHistory() {
+            if (history.length === 0) return;
+            
+            historyEl.innerHTML = '';
+            const startPos = count - history.length + 1;
+            
+            history.forEach((num, idx) => {
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                div.innerHTML = `<span class="position">#${(startPos + idx).toLocaleString()}</span>${num}`;
+                historyEl.appendChild(div);
+            });
+            
+            // Auto-scroll to bottom
+            historyEl.scrollTop = historyEl.scrollHeight;
+        }
+
+        function startUptimeCounter() {
+            if (uptimeInterval) clearInterval(uptimeInterval);
+            
+            function updateUptime() {
+                if (!serverStartTime) return;
+                
+                const now = new Date();
+                const diff = now - serverStartTime;
+                const minutes = Math.floor(diff / 60000);
+                const hours = Math.floor(minutes / 60);
+                const days = Math.floor(hours / 24);
+                
+                if (days > 0) {
+                    uptimeEl.textContent = `${days}d ${hours % 24}h`;
+                } else if (hours > 0) {
+                    uptimeEl.textContent = `${hours}h ${minutes % 60}m`;
+                } else {
+                    uptimeEl.textContent = `${minutes}m`;
+                }
+                
+                // Update next save time
+                if (lastSaveTime) {
+                    const timeSinceLastSave = now - lastSaveTime;
+                    const nextSaveIn = Math.max(0, 10 * 60 * 1000 - timeSinceLastSave);
+                    const minutesUntilSave = Math.ceil(nextSaveIn / 60000);
+                    nextSaveEl.textContent = `${minutesUntilSave}m`;
+                }
+            }
+            
+            updateUptime();
+            uptimeInterval = setInterval(updateUptime, 5000); // Update every 5 seconds
+        }
+
+        function formatDateTime(date) {
+            const now = new Date();
+            const diff = now - date;
+            const minutes = Math.floor(diff / 60000);
+            
+            if (minutes < 1) return 'Just now';
+            if (minutes < 60) return `${minutes}m ago`;
+            
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `${hours}h ago`;
+            
+            const days = Math.floor(hours / 24);
+            return `${days}d ago`;
+        }
+
+        function showSaveIndicator() {
+            saveIndicatorEl.classList.add('show');
+            setTimeout(() => {
+                saveIndicatorEl.classList.remove('show');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
