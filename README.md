@@ -1,15 +1,17 @@
 # Infinity Runner
 
-A Node.js server that continuously computes Fibonacci sequence numbers and displays them in real-time on a web interface. The server saves progress to a GitHub repository every 45 numbers and can resume from where it left off after restarts.
+A Node.js server that continuously computes Fibonacci sequence numbers and displays them in real-time on a modern web interface. The server saves progress to a GitHub repository every 10 minutes and can resume from where it left off after restarts.
 
 ## Features
 
-- 🔢 **Continuous Computation**: Computes Fibonacci sequence numbers continuously
-- 📊 **Live Web Interface**: Real-time display of computation progress via WebSocket
-- 💾 **GitHub Persistence**: Saves progress every 45 numbers to a GitHub repository
+- 🔢 **Continuous Computation**: Computes Fibonacci sequence numbers continuously (10 numbers/second)
+- 📊 **Modern Web Interface**: Real-time display with educational content about the Fibonacci sequence
+- 💾 **GitHub Persistence**: Saves progress every 10 minutes to avoid rate limiting
 - 🔄 **Auto-Resume**: Automatically resumes from the last saved position on restart
-- 📈 **Statistics Dashboard**: Shows current number, total count, and next save point
+- 📈 **Statistics Dashboard**: Shows numbers computed, digits, uptime, and next save countdown
 - 🎨 **Beautiful UI**: Modern gradient design with real-time animations
+- 💡 **Educational**: Explains how the Fibonacci sequence works and displays server specs
+- ☁️ **Cloud-Ready**: Optimized for Render.com free tier (512 MB RAM, 0.1 vCPU)
 
 ## Prerequisites
 
@@ -70,11 +72,22 @@ Press `Ctrl+C` in the terminal. The server will gracefully save the current prog
 
 ## How It Works
 
-1. **Computation**: The server computes Fibonacci numbers using BigInt to handle arbitrarily large numbers
-2. **Live Updates**: Each computed number is broadcast to all connected web clients via WebSocket
-3. **Persistence**: Every 45 numbers, the server saves the latest 45 numbers to the GitHub repository's README
-4. **Resume**: On startup, the server checks the GitHub repository and resumes from the last saved state
-5. **Graceful Shutdown**: When stopped (SIGINT/SIGTERM), the server saves current progress before exiting
+### The Fibonacci Sequence
+The Fibonacci sequence is a series of numbers where each number is the sum of the two preceding ones:
+- Formula: `F(n) = F(n-1) + F(n-2)`
+- Example: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89...
+- Found in nature (spirals, petals), architecture, and art
+- Related to the golden ratio (φ ≈ 1.618)
+
+### Server Operation
+1. **Computation**: Uses BigInt for unlimited precision, computes a new number every 100ms
+2. **Live Updates**: WebSocket broadcasts each number to all connected clients instantly
+3. **Persistence**: Every 10 minutes, saves latest 45 numbers to GitHub repository's README
+4. **Resume**: On startup, checks GitHub repository and continues from last saved state
+5. **Graceful Shutdown**: Saves current progress before exiting (SIGINT/SIGTERM)
+
+### Why 10 Minutes?
+To avoid GitHub API rate limiting, especially on free-tier hosting platforms like Render.com.
 
 ## Project Structure
 
@@ -101,12 +114,36 @@ Infinity-runner/
 ## Technical Details
 
 - **Equation**: Fibonacci sequence (F(n) = F(n-1) + F(n-2))
-- **Interval**: Computes a new number every 100ms
-- **Save Frequency**: Every 45 numbers
+- **Computation Rate**: 10 numbers per second (100ms interval)
+- **Save Frequency**: Every 10 minutes (to avoid GitHub rate limiting)
 - **Number Storage**: Uses BigInt for unlimited precision
 - **Web Framework**: Express.js
 - **Real-time Communication**: WebSocket (ws library)
-- **GitHub API**: Octokit
+- **GitHub API**: Octokit (@octokit/rest)
+- **Environment Config**: dotenv
+
+## Deployment
+
+### Render.com (Recommended)
+
+This application is optimized for Render.com's free tier:
+
+**Free Tier Specs:**
+- RAM: 512 MB
+- CPU: 0.1 vCPU
+- Perfect for continuous Fibonacci computation
+
+**Deployment Steps:**
+1. Fork this repository to your GitHub account
+2. Create a new Web Service on Render.com
+3. Connect your GitHub repository
+4. Set environment variables in Render dashboard:
+   - `GITHUB_TOKEN`
+   - `GITHUB_OWNER`
+   - `GITHUB_REPO`
+5. Deploy!
+
+The 10-minute save interval is specifically designed to work well with free hosting tiers and avoid GitHub API rate limits.
 
 ## License
 

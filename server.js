@@ -31,6 +31,15 @@ let count = 0;
 let a = 0n; // Using BigInt for large Fibonacci numbers
 let b = 1n;
 let isSaving = false; // Flag to prevent concurrent saves
+let serverStartTime = new Date();
+let lastSaveTime = new Date();
+
+// Server specs (for display on frontend)
+const SERVER_SPECS = {
+  platform: 'Render.com Free Tier',
+  ram: '512 MB',
+  cpu: '0.1 vCPU'
+};
 
 // Broadcast to all connected clients
 function broadcast(data) {
@@ -156,15 +165,6 @@ function computeNext() {
     number: next.toString(),
     position: count
   });
-
-  // Save every 45 numbers
-  if (count % 45 === 0 && !isSaving) {
-    console.log(`Reached ${count} numbers, saving to GitHub...`);
-    isSaving = true;
-    saveStateToGitHub().finally(() => {
-      isSaving = false;
-    });
-  }
 }
 
 // WebSocket connection handler
@@ -176,7 +176,10 @@ wss.on('connection', (ws) => {
     type: 'init',
     count: count,
     currentNumber: b.toString(),
-    last45: currentNumbers.slice(-45)
+    last45: currentNumbers.slice(-45),
+    serverSpecs: SERVER_SPECS,
+    serverStartTime: serverStartTime.toISOString(),
+    lastSaveTime: lastSaveTime.toISOString()
   }));
 
   ws.on('close', () => {
@@ -184,10 +187,33 @@ wss.on('connection', (ws) => {
   });
 });
 
+// Periodic save function (every 10 minutes)
+function startPeriodicSave() {
+  setInterval(() => {
+    if (!isSaving && count > 0) {
+      console.log(`Periodic save triggered (10 minutes elapsed, ${count} numbers computed)`);
+      isSaving = true;
+      saveStateToGitHub().finally(() => {
+        isSaving = false;
+        lastSaveTime = new Date();
+        // Notify all clients about the save
+        broadcast({
+          type: 'save',
+          lastSaveTime: lastSaveTime.toISOString(),
+          count: count
+        });
+      });
+    }
+  }, 10 * 60 * 1000); // 10 minutes in milliseconds
+}
+
 // Main computation loop
 async function startComputation() {
   // Load previous state
   await loadStateFromGitHub();
+  
+  // Start periodic saves
+  startPeriodicSave();
   
   console.log('Starting computation...');
   
