@@ -30,7 +30,8 @@ let currentNumbers = [];
 let count = 0;
 let a = 0n; // Using BigInt for large Fibonacci numbers
 let b = 1n;
-let isSaving = false; // Flag to prevent concurrent saves
+let isSaving = false; // Flag to track if save is in progress
+let pendingSave = false; // Flag to track if a save is queued
 let serverStartTime = new Date();
 let lastSaveTime = new Date();
 
@@ -91,12 +92,25 @@ async function loadStateFromGitHub() {
   }
 }
 
-// Save state to GitHub
+// Save state to GitHub with queuing mechanism
 async function saveStateToGitHub() {
+  // If already saving, mark that we need another save with latest data
+  if (isSaving) {
+    pendingSave = true;
+    console.log('Save already in progress, queuing latest state...');
+    return;
+  }
+
+  isSaving = true;
+  pendingSave = false;
+
   try {
-    const last45 = currentNumbers.slice(-45);
-    const startPosition = Math.max(1, count - last45.length + 1);
-    const numbersText = last45.map((num, idx) => {
+    // Capture current state at the moment of save
+    const saveCount = count;
+    const saveLast45 = currentNumbers.slice(-45);
+    
+    const startPosition = Math.max(1, saveCount - saveLast45.length + 1);
+    const numbersText = saveLast45.map((num, idx) => {
       const position = startPosition + idx;
       return `${position}: ${num}`;
     }).join('\n');
@@ -113,7 +127,7 @@ ${numbersText}
 
 ## Statistics
 
-- Total numbers computed: ${count}
+- Total numbers computed: ${saveCount}
 - Last updated: ${new Date().toISOString()}
 
 ## About
@@ -139,14 +153,31 @@ This is an automated computation running a Fibonacci sequence. The server comput
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
       path: README_PATH,
-      message: `Update computation progress: ${count} numbers computed`,
+      message: `Update computation progress: ${saveCount} numbers computed`,
       content: Buffer.from(readmeContent).toString('base64'),
       ...(sha && { sha }),
     });
 
-    console.log(`Saved progress to GitHub: ${count} numbers`);
+    console.log(`Saved progress to GitHub: ${saveCount} numbers`);
+    lastSaveTime = new Date();
+    
+    // Notify all clients about the save
+    broadcast({
+      type: 'save',
+      lastSaveTime: lastSaveTime.toISOString(),
+      count: saveCount
+    });
   } catch (error) {
     console.error('Error saving to GitHub:', error.message);
+  } finally {
+    isSaving = false;
+    
+    // If a save was requested while we were saving, trigger another save with latest data
+    if (pendingSave) {
+      console.log('Processing queued save with latest data...');
+      // Use setImmediate to avoid blocking and allow computation to continue
+      setImmediate(() => saveStateToGitHub());
+    }
   }
 }
 
@@ -190,19 +221,10 @@ wss.on('connection', (ws) => {
 // Periodic save function (every 10 minutes)
 function startPeriodicSave() {
   setInterval(() => {
-    if (!isSaving && count > 0) {
+    if (count > 0) {
       console.log(`Periodic save triggered (10 minutes elapsed, ${count} numbers computed)`);
-      isSaving = true;
-      saveStateToGitHub().finally(() => {
-        isSaving = false;
-        lastSaveTime = new Date();
-        // Notify all clients about the save
-        broadcast({
-          type: 'save',
-          lastSaveTime: lastSaveTime.toISOString(),
-          count: count
-        });
-      });
+      // Queue the save - it won't block computation
+      saveStateToGitHub();
     }
   }, 10 * 60 * 1000); // 10 minutes in milliseconds
 }
