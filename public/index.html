@@ -55,7 +55,6 @@
             font-size: 0.9em;
             font-weight: bold;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-            margin-top: 10px;
         }
 
         .connected {
@@ -64,6 +63,44 @@
 
         .disconnected {
             background: #ef4444;
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .save-btn {
+            display: inline-block;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .save-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .save-btn:active {
+            transform: translateY(0);
+        }
+
+        .save-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
 
         /* Main Grid Layout */
@@ -376,7 +413,10 @@
                 <span>∞</span>
             </h1>
             <p class="subtitle">Real-time Fibonacci Sequence Computation Engine</p>
-            <div class="connection-status disconnected" id="status">Connecting...</div>
+            <div class="header-controls">
+                <div class="connection-status disconnected" id="status">Connecting...</div>
+                <button class="save-btn" id="manual-save-btn">💾 Save</button>
+            </div>
         </div>
 
         <div class="stats-grid">
@@ -469,10 +509,6 @@
     </div>
 
     <div id="ui-layer">
-        <div id="score">Score: 0</div>
-        <div id="high-score">High Score: 0</div>
-        <div id="level">Level: 1</div>
-        <button id="manual-save-btn" style="position: absolute; top: 10px; right: 10px; padding: 5px 10px; background: #333; color: white; border: 1px solid #666; cursor: pointer; z-index: 1000;">Save</button>
         <div id="start-screen">
             <h1>Infinity Runner</h1>
             <button id="start-btn">Start</button>
@@ -495,7 +531,6 @@
         const cpuEl = document.getElementById('cpu');
         const serverStartEl = document.getElementById('serverStart');
         const saveIndicatorEl = document.getElementById('saveIndicator');
-        const levelElement = document.getElementById('level');
         const manualSaveBtn = document.getElementById('manual-save-btn');
 
         let count = 0;

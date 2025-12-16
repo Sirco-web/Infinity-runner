@@ -1,18 +1,19 @@
 const express = require('express');
 const { WebSocketServer, WebSocket } = require('ws');
 const { Octokit } = require('@octokit/rest');
-require('dotenv').config();
+require('dotenv').config({ override: true });
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+// Use GH_PAT to avoid Codespaces overriding GITHUB_TOKEN
+const GITHUB_TOKEN = process.env.GH_PAT || process.env.GITHUB_TOKEN;
 const REPO_OWNER = process.env.GITHUB_OWNER;
 const REPO_NAME = process.env.GITHUB_REPO;
 const OWNER_PIN = process.env.OWNER_PIN;
 
 if (!GITHUB_TOKEN || !REPO_OWNER || !REPO_NAME) {
-    console.error('Error: GITHUB_TOKEN, GITHUB_OWNER, and GITHUB_REPO must be defined in .env');
+    console.error('Error: GH_PAT (or GITHUB_TOKEN), GITHUB_OWNER, and GITHUB_REPO must be defined in .env');
     process.exit(1);
 }
 
@@ -29,23 +30,15 @@ const wss = new WebSocketServer({ server });
 
 // GitHub setup
 const octokit = new Octokit({
-  auth: process.env.GITHUB_TOKEN
+  auth: GITHUB_TOKEN
 });
 
-const GITHUB_OWNER = process.env.GITHUB_OWNER || 'Sirco-web';
-const GITHUB_REPO = process.env.GITHUB_REPO || 'infinity-runner-data';
 const README_PATH = 'README.md';
-const REPO_OWNER = process.env.GITHUB_OWNER;
-const REPO_NAME = process.env.GITHUB_REPO;
-const OWNER_PIN = process.env.OWNER_PIN;
-
-if (!GITHUB_TOKEN || !REPO_OWNER || !REPO_NAME) {
-  console.error('GitHub token, owner, and repo must be configured');
-  process.exit(1);
-}
+const ALL_NUMBERS_PATH = 'all.json';
 
 // State management
 let currentNumbers = [];
+let allNumbers = []; // Store ALL computed numbers
 let count = 0;
 let a = 0n; // Using BigInt for large Fibonacci numbers
 let b = 1n;
@@ -65,6 +58,9 @@ const SERVER_SPECS = {
   cpu: '0.1 vCPU'
 };
 
+// Track if GitHub integration is available
+let githubAvailable = false;
+
 // Broadcast to all connected clients
 function broadcast(data) {
   wss.clients.forEach(client => {
@@ -74,16 +70,80 @@ function broadcast(data) {
   });
 }
 
+// Check if the repository exists and set githubAvailable flag
+async function checkRepositoryExists() {
+  try {
+    await octokit.repos.get({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+    });
+    console.log(`✓ Repository ${REPO_OWNER}/${REPO_NAME} found - GitHub saving enabled`);
+    githubAvailable = true;
+    return true;
+  } catch (error) {
+    if (error.status === 404) {
+      console.log(`⚠ Repository ${REPO_OWNER}/${REPO_NAME} not found`);
+      console.log(`  Please create it manually at: https://github.com/new`);
+      console.log(`  Repository name: ${REPO_NAME}`);
+      console.log(`  GitHub saving disabled until repository is created`);
+    } else {
+      console.error('Error checking repository:', error.message);
+    }
+    githubAvailable = false;
+    return false;
+  }
+}
+
 // Load state from GitHub
 async function loadStateFromGitHub() {
+  if (!githubAvailable) {
+    console.log('GitHub not available, starting fresh');
+    return;
+  }
+  
+  // First, try to load all.json for complete history
   try {
     const { data } = await octokit.repos.getContent({
-      owner: GITHUB_OWNER,
-      repo: GITHUB_REPO,
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      path: ALL_NUMBERS_PATH,
+    });
+    const content = Buffer.from(data.content, 'base64').toString('utf8');
+    const parsed = JSON.parse(content);
+    allNumbers = parsed.numbers || [];
+    count = parsed.count || allNumbers.length;
+    
+    if (allNumbers.length >= 2) {
+      const lastTwo = allNumbers.slice(-2);
+      a = BigInt(lastTwo[0]);
+      b = BigInt(lastTwo[1]);
+      currentNumbers = allNumbers.slice(-45);
+      console.log(`Loaded ${allNumbers.length} numbers from all.json`);
+      console.log(`Resuming from position ${count}`);
+      return;
+    }
+  } catch (error) {
+    if (error.status !== 404) {
+      console.error('Error loading all.json:', error.message);
+    }
+  }
+  
+  // Fall back to README if all.json doesn't exist
+  try {
+    const { data } = await octokit.repos.getContent({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
       path: README_PATH,
     });
 
     const content = Buffer.from(data.content, 'base64').toString('utf8');
+    
+    // Parse the total count from Statistics section
+    const countMatch = content.match(/Total numbers computed: (\d+)/);
+    if (countMatch) {
+      count = parseInt(countMatch[1], 10);
+      console.log(`Total numbers previously computed: ${count}`);
+    }
     
     // Parse the README to get the last numbers
     const match = content.match(/## Latest 45 Digits\n\n```\n([\s\S]*?)\n```/);
@@ -101,9 +161,10 @@ async function loadStateFromGitHub() {
         const lastTwo = currentNumbers.slice(-2);
         a = BigInt(lastTwo[0]);
         b = BigInt(lastTwo[1]);
-        count = currentNumbers.length;
+        // Rebuild allNumbers from what we have
+        allNumbers = [...currentNumbers];
         console.log(`Resuming from position ${count}`);
-        console.log(`Last two numbers: ${a}, ${b}`);
+        console.log(`Last two numbers loaded for sequence continuation`);
       }
     }
   } catch (error) {
@@ -117,6 +178,16 @@ async function loadStateFromGitHub() {
 
 // Save state to GitHub with queuing mechanism
 async function saveStateToGitHub() {
+  // Check if GitHub is available
+  if (!githubAvailable) {
+    // Try to check again in case repo was created
+    const available = await checkRepositoryExists();
+    if (!available) {
+      console.log('GitHub save skipped - repository not available');
+      return;
+    }
+  }
+
   // If already saving, mark that we need another save with latest data
   if (isSaving) {
     pendingSave = true;
@@ -162,8 +233,8 @@ This is an automated computation running a Fibonacci sequence. The server comput
     let sha;
     try {
       const { data } = await octokit.repos.getContent({
-        owner: GITHUB_OWNER,
-        repo: GITHUB_REPO,
+        owner: REPO_OWNER,
+        repo: REPO_NAME,
         path: README_PATH,
       });
       sha = data.sha;
@@ -173,15 +244,45 @@ This is an automated computation running a Fibonacci sequence. The server comput
 
     // Update or create file
     await octokit.repos.createOrUpdateFileContents({
-      owner: GITHUB_OWNER,
-      repo: GITHUB_REPO,
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
       path: README_PATH,
       message: `Update computation progress: ${saveCount} numbers computed`,
       content: Buffer.from(readmeContent).toString('base64'),
       ...(sha && { sha }),
     });
 
-    console.log(`Saved progress to GitHub: ${saveCount} numbers`);
+    console.log(`Saved README to GitHub: ${saveCount} numbers`);
+
+    // Save all.json with complete history
+    const allNumbersData = {
+      count: saveCount,
+      lastUpdated: new Date().toISOString(),
+      numbers: allNumbers
+    };
+    
+    let allJsonSha;
+    try {
+      const { data } = await octokit.repos.getContent({
+        owner: REPO_OWNER,
+        repo: REPO_NAME,
+        path: ALL_NUMBERS_PATH,
+      });
+      allJsonSha = data.sha;
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+
+    await octokit.repos.createOrUpdateFileContents({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      path: ALL_NUMBERS_PATH,
+      message: `Update all numbers: ${saveCount} total`,
+      content: Buffer.from(JSON.stringify(allNumbersData, null, 2)).toString('base64'),
+      ...(allJsonSha && { sha: allJsonSha }),
+    });
+
+    console.log(`Saved all.json to GitHub: ${allNumbers.length} numbers`);
     lastSaveTime = new Date();
     
     // Notify all clients about the save
@@ -211,12 +312,14 @@ function computeNext() {
   b = next;
   
   count++;
-  currentNumbers.push(next.toString());
+  const numStr = next.toString();
+  currentNumbers.push(numStr);
+  allNumbers.push(numStr); // Add to complete history
   
   // Broadcast to all clients
   broadcast({
     type: 'number',
-    number: next.toString(),
+    number: numStr,
     position: count
   });
 }
@@ -254,6 +357,9 @@ function startPeriodicSave() {
 
 // Main computation loop
 async function startComputation() {
+  // Check if repository exists
+  await checkRepositoryExists();
+  
   // Load previous state
   await loadStateFromGitHub();
   
@@ -304,7 +410,7 @@ app.post('/api/manual-save', async (req, res) => {
     }
 
     try {
-        await saveProgressToGitHub();
+        await saveStateToGitHub();
         lastManualSaveTime = now;
         // Reset automatic timer to avoid double saving shortly after
         lastCommitTime = now;
