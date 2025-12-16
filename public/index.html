@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinity Runner - Live Computation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Monaco', 'Courier New', monospace;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 10px;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        .current-number-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .current-number-label {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            text-align: center;
+            opacity: 0.9;
+        }
+
+        .current-number {
+            font-size: 1.5em;
+            word-break: break-all;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            min-height: 100px;
+            line-height: 1.6;
+            animation: pulse 0.3s ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
+        }
+
+        .history-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .history-label {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            text-align: center;
+            opacity: 0.9;
+        }
+
+        .history {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 0.9em;
+        }
+
+        .history-item {
+            padding: 8px;
+            margin-bottom: 5px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+            word-break: break-all;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .history-item .position {
+            color: #ffd700;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .connected {
+            background: #10b981;
+        }
+
+        .disconnected {
+            background: #ef4444;
+        }
+
+        .number-length {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        /* Scrollbar styling */
+        .history::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .history::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .history::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .history::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status disconnected" id="status">Connecting...</div>
+    
+    <div class="container">
+        <h1>🚀 Infinity Runner</h1>
+        <p class="subtitle">Live Fibonacci Sequence Computation</p>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Numbers Computed</div>
+                <div class="stat-value" id="count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Current Digits</div>
+                <div class="stat-value" id="digits">1</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Next Save At</div>
+                <div class="stat-value" id="nextSave">45</div>
+            </div>
+        </div>
+
+        <div class="current-number-container">
+            <div class="current-number-label">Current Number</div>
+            <div class="current-number" id="currentNumber">Initializing...</div>
+            <div class="number-length" id="numberLength"></div>
+        </div>
+
+        <div class="history-container">
+            <div class="history-label">Recent Numbers (Last 45)</div>
+            <div class="history" id="history"></div>
+        </div>
+    </div>
+
+    <script>
+        const ws = new WebSocket(`ws://${window.location.host}`);
+        const statusEl = document.getElementById('status');
+        const countEl = document.getElementById('count');
+        const digitsEl = document.getElementById('digits');
+        const nextSaveEl = document.getElementById('nextSave');
+        const currentNumberEl = document.getElementById('currentNumber');
+        const numberLengthEl = document.getElementById('numberLength');
+        const historyEl = document.getElementById('history');
+
+        let count = 0;
+        let history = [];
+
+        ws.onopen = () => {
+            console.log('Connected to server');
+            statusEl.textContent = 'Connected';
+            statusEl.className = 'connection-status connected';
+        };
+
+        ws.onclose = () => {
+            console.log('Disconnected from server');
+            statusEl.textContent = 'Disconnected';
+            statusEl.className = 'connection-status disconnected';
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'init') {
+                count = data.count;
+                history = data.last45 || [];
+                updateDisplay(data.currentNumber, count);
+                renderHistory();
+            } else if (data.type === 'number') {
+                count = data.position;
+                history.push(data.number);
+                if (history.length > 45) {
+                    history.shift();
+                }
+                updateDisplay(data.number, count);
+                renderHistory();
+            }
+        };
+
+        function updateDisplay(number, position) {
+            currentNumberEl.textContent = number;
+            currentNumberEl.style.animation = 'none';
+            setTimeout(() => {
+                currentNumberEl.style.animation = 'pulse 0.3s ease-in-out';
+            }, 10);
+            
+            countEl.textContent = position.toLocaleString();
+            digitsEl.textContent = number.length.toLocaleString();
+            
+            const remaining = 45 - (position % 45);
+            nextSaveEl.textContent = remaining === 45 ? 45 : remaining;
+            
+            numberLengthEl.textContent = `${number.length.toLocaleString()} digits`;
+        }
+
+        function renderHistory() {
+            historyEl.innerHTML = '';
+            const startPos = count - history.length + 1;
+            
+            history.forEach((num, idx) => {
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                div.innerHTML = `<span class="position">#${(startPos + idx).toLocaleString()}</span>${num}`;
+                historyEl.appendChild(div);
+            });
+            
+            // Auto-scroll to bottom
+            historyEl.scrollTop = historyEl.scrollHeight;
+        }
+    </script>
+</body>
+</html>
