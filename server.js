@@ -118,7 +118,7 @@ ${numbersText}
 
 ## About
 
-This is an automated computation running a Fibonacci sequence. The server computes numbers continuously and saves progress every 45 numbers.
+This is an automated computation running a Fibonacci sequence. The server computes numbers continuously and saves progress every 10 minutes.
 `;
 
     // Check if file exists
