@@ -41,6 +41,7 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB GitHub limit
 // State management
 let currentNumbers = [];
 let allNumbers = []; // Store ALL computed numbers
+let allNumbersNeedsFetch = false; // Flag to indicate we need to fetch existing data before saving
 let count = 0;
 let a = 0n; // Using BigInt for large Fibonacci numbers
 let b = 1n;
@@ -211,10 +212,13 @@ async function loadStateFromGitHub() {
         const lastTwo = currentNumbers.slice(-2);
         a = BigInt(lastTwo[0]);
         b = BigInt(lastTwo[1]);
-        // Rebuild allNumbers from what we have
-        allNumbers = [...currentNumbers];
+        // Keep allNumbers empty - we'll load from GitHub on save to merge
+        // This prevents overwriting existing data with just 45 numbers
+        allNumbers = [];
+        allNumbersNeedsFetch = true; // Flag to fetch existing data before saving
         console.log(`Resuming from position ${count}`);
         console.log(`Last two numbers loaded for sequence continuation`);
+        console.log(`Note: allNumbers will be fetched from GitHub before next save`);
       }
     }
   } catch (error) {
@@ -360,8 +364,73 @@ async function processQueue() {
   isProcessingQueue = false;
 }
 
+// Fetch existing numbers from GitHub to merge with new ones
+async function fetchExistingNumbers() {
+  try {
+    const { data } = await octokit.repos.getContent({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      path: ALL_NUMBERS_PATH,
+    });
+    const content = Buffer.from(data.content, 'base64').toString('utf8');
+    const parsed = JSON.parse(content);
+    
+    if (parsed.chunks) {
+      // Load chunked data
+      console.log('Fetching existing chunked data...');
+      const existingNumbers = [];
+      for (let i = 0; i < parsed.chunks; i++) {
+        try {
+          const { data: chunkData } = await octokit.repos.getContent({
+            owner: REPO_OWNER,
+            repo: REPO_NAME,
+            path: `chunks/chunk_${i}.json`,
+          });
+          const chunkContent = Buffer.from(chunkData.content, 'base64').toString('utf8');
+          const chunk = JSON.parse(chunkContent);
+          existingNumbers.push(...chunk.numbers);
+        } catch (e) {
+          console.error(`Error loading chunk ${i}:`, e.message);
+        }
+      }
+      return existingNumbers;
+    } else if (parsed.numbers) {
+      return parsed.numbers;
+    }
+  } catch (error) {
+    if (error.status !== 404) {
+      console.error('Error fetching existing numbers:', error.message);
+    }
+  }
+  return [];
+}
+
 // Save all numbers, chunking if too large
 async function saveAllNumbersToGitHub(saveCount, numbers) {
+  // If we need to fetch existing data first (fell back from README)
+  if (allNumbersNeedsFetch && numbers.length < saveCount) {
+    console.log('Fetching existing numbers from GitHub to merge...');
+    const existingNumbers = await fetchExistingNumbers();
+    if (existingNumbers.length > 0) {
+      // Merge: use existing numbers up to where we have, then add new ones
+      const existingCount = existingNumbers.length;
+      const newNumbersStart = numbers.length > 0 ? saveCount - numbers.length : existingCount;
+      
+      if (newNumbersStart >= existingCount) {
+        // Existing data is older, append our new numbers
+        numbers = [...existingNumbers, ...numbers];
+        console.log(`Merged: ${existingNumbers.length} existing + ${numbers.length - existingNumbers.length} new = ${numbers.length} total`);
+      } else {
+        // Our numbers overlap, take existing up to overlap point then our new ones
+        numbers = [...existingNumbers.slice(0, newNumbersStart), ...numbers];
+        console.log(`Merged with overlap: ${numbers.length} total numbers`);
+      }
+    }
+    allNumbersNeedsFetch = false;
+    // Update allNumbers with merged data
+    allNumbers = numbers;
+  }
+
   const allNumbersData = {
     count: saveCount,
     lastUpdated: new Date().toISOString(),

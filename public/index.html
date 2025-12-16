@@ -103,6 +103,37 @@
             transform: none;
         }
 
+        .toggle-btn {
+            display: inline-block;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .toggle-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .toggle-btn.active {
+            background: #10b981;
+            border-color: #10b981;
+        }
+
+        .live-section {
+            transition: opacity 0.3s ease, max-height 0.3s ease;
+        }
+
+        .live-section.hidden {
+            display: none;
+        }
+
         /* Main Grid Layout */
         .main-grid {
             display: grid;
@@ -438,6 +469,7 @@
             <div class="header-controls">
                 <div class="connection-status disconnected" id="status">Connecting...</div>
                 <button class="save-btn" id="manual-save-btn">💾 Save</button>
+                <button class="toggle-btn active" id="toggle-live">👁 Live Numbers</button>
             </div>
         </div>
 
@@ -461,7 +493,7 @@
         </div>
 
         <div class="main-grid">
-            <div class="card">
+            <div class="card live-section" id="liveSection">
                 <h2>📊 Live Computation</h2>
                 <div class="current-number-display">
                     <div class="current-number" id="currentNumber">Initializing...</div>
@@ -539,7 +571,7 @@
 
     <script>
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+        let ws;
         const statusEl = document.getElementById('status');
         const countEl = document.getElementById('count');
         const digitsEl = document.getElementById('digits');
@@ -554,64 +586,113 @@
         const serverStartEl = document.getElementById('serverStart');
         const saveIndicatorEl = document.getElementById('saveIndicator');
         const manualSaveBtn = document.getElementById('manual-save-btn');
+        const toggleLiveBtn = document.getElementById('toggle-live');
+        const liveSection = document.getElementById('liveSection');
 
         let count = 0;
         let history = [];
         let serverStartTime = null;
         let lastSaveTime = null;
         let uptimeInterval = null;
+        let liveVisible = true;
 
-        ws.onopen = () => {
-            console.log('Connected to server');
-            statusEl.textContent = '● Connected';
-            statusEl.className = 'connection-status connected';
-        };
+        // Toggle live numbers section
+        toggleLiveBtn.addEventListener('click', () => {
+            liveVisible = !liveVisible;
+            liveSection.classList.toggle('hidden', !liveVisible);
+            toggleLiveBtn.classList.toggle('active', liveVisible);
+            toggleLiveBtn.textContent = liveVisible ? '👁 Live Numbers' : '👁 Show Live';
+            localStorage.setItem('liveVisible', liveVisible);
+        });
 
-        ws.onclose = () => {
-            console.log('Disconnected from server');
-            statusEl.textContent = '● Disconnected';
-            statusEl.className = 'connection-status disconnected';
-            if (uptimeInterval) clearInterval(uptimeInterval);
-        };
+        // Restore toggle state from localStorage
+        const savedLiveVisible = localStorage.getItem('liveVisible');
+        if (savedLiveVisible === 'false') {
+            liveVisible = false;
+            liveSection.classList.add('hidden');
+            toggleLiveBtn.classList.remove('active');
+            toggleLiveBtn.textContent = '👁 Show Live';
+        }
 
-        ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-        };
-
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
+        // WebSocket connection with reconnection
+        function connectWebSocket() {
+            ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
             
-            if (data.type === 'init') {
-                count = data.count;
-                history = data.last45 || [];
-                serverStartTime = new Date(data.serverStartTime);
-                lastSaveTime = new Date(data.lastSaveTime);
+            ws.onopen = () => {
+                console.log('Connected to server');
+                statusEl.textContent = '● Connected';
+                statusEl.className = 'connection-status connected';
+            };
+
+            ws.onclose = () => {
+                console.log('Disconnected from server');
+                statusEl.textContent = '● Disconnected';
+                statusEl.className = 'connection-status disconnected';
+                if (uptimeInterval) clearInterval(uptimeInterval);
+                // Reconnect after 2 seconds
+                setTimeout(connectWebSocket, 2000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+            
+                if (data.type === 'init') {
+                    count = data.count;
+                    history = data.last45 || [];
+                    serverStartTime = new Date(data.serverStartTime);
+                    lastSaveTime = new Date(data.lastSaveTime);
                 
-                // Update server specs
-                if (data.serverSpecs) {
-                    platformEl.textContent = data.serverSpecs.platform;
-                    ramEl.textContent = data.serverSpecs.ram;
-                    cpuEl.textContent = data.serverSpecs.cpu;
+                    // Update server specs
+                    if (data.serverSpecs) {
+                        platformEl.textContent = data.serverSpecs.platform;
+                        ramEl.textContent = data.serverSpecs.ram;
+                        cpuEl.textContent = data.serverSpecs.cpu;
+                    }
+                
+                    serverStartEl.textContent = formatDateTime(serverStartTime);
+                
+                    updateDisplay(data.currentNumber, count);
+                    renderHistory();
+                    startUptimeCounter();
+                } else if (data.type === 'number') {
+                    // Only process live numbers if live mode is enabled
+                    if (!liveVisible) {
+                        // Just update count for stats display, skip heavy rendering
+                        count = data.position;
+                        countEl.textContent = count.toLocaleString();
+                        digitsEl.textContent = data.number.length.toLocaleString();
+                        return;
+                    }
+                    count = data.position;
+                    history.push(data.number);
+                    if (history.length > 45) {
+                        history.shift();
+                    }
+                    updateDisplay(data.number, count);
+                    renderHistory();
+                } else if (data.type === 'save') {
+                    lastSaveTime = new Date(data.lastSaveTime);
+                    showSaveIndicator();
                 }
-                
-                serverStartEl.textContent = formatDateTime(serverStartTime);
-                
-                updateDisplay(data.currentNumber, count);
-                renderHistory();
-                startUptimeCounter();
-            } else if (data.type === 'number') {
-                count = data.position;
-                history.push(data.number);
-                if (history.length > 45) {
-                    history.shift();
+            };
+        }
+
+        // Initial connection
+        connectWebSocket();
+
+        // Reconnect when tab becomes visible (fixes white page issue)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    console.log('Tab visible, reconnecting...');
+                    connectWebSocket();
                 }
-                updateDisplay(data.number, count);
-                renderHistory();
-            } else if (data.type === 'save') {
-                lastSaveTime = new Date(data.lastSaveTime);
-                showSaveIndicator();
             }
-        };
+        });
 
         manualSaveBtn.addEventListener('click', async () => {
             const pin = prompt("Enter Owner PIN to save:");
