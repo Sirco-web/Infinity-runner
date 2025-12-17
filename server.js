@@ -99,30 +99,53 @@ async function checkRepositoryExists() {
   }
 }
 
-// Load chunked data from multiple files
+// Load chunked data from multiple files (handles old chunk format)
 async function loadChunkedData(indexData) {
   const numChunks = indexData.chunks;
   allNumbers = [];
+  let loadedAny = false;
   
-  console.log(`Loading ${numChunks} chunk files...`);
+  console.log(`Attempting to load ${numChunks} chunk files...`);
   
   for (let i = 0; i < numChunks; i++) {
-    const chunkPath = `chunks/chunk_${String(i + 1).padStart(4, '0')}.json`;
+    // Try different chunk path formats (old and new)
+    const chunkPaths = [
+      `chunks/chunk_${String(i + 1).padStart(4, '0')}.json`,
+      `chunks/chunk_${i}.json`,
+      `chunk_${i}.json`
+    ];
     
-    try {
-      const { data } = await octokit.repos.getContent({
-        owner: REPO_OWNER,
-        repo: REPO_NAME,
-        path: chunkPath,
-      });
-      const content = Buffer.from(data.content, 'base64').toString('utf8');
-      const chunkData = JSON.parse(content);
-      allNumbers.push(...chunkData.numbers);
-      console.log(`Loaded chunk ${i + 1}/${numChunks}`);
-    } catch (error) {
-      console.error(`Error loading chunk ${i + 1}:`, error.message);
+    let loaded = false;
+    for (const chunkPath of chunkPaths) {
+      try {
+        const { data } = await octokit.repos.getContent({
+          owner: REPO_OWNER,
+          repo: REPO_NAME,
+          path: chunkPath,
+        });
+        const content = Buffer.from(data.content, 'base64').toString('utf8');
+        const chunkData = JSON.parse(content);
+        allNumbers.push(...chunkData.numbers);
+        console.log(`Loaded chunk ${i + 1}/${numChunks} from ${chunkPath}`);
+        loaded = true;
+        loadedAny = true;
+        break;
+      } catch (error) {
+        // Try next path format
+      }
+    }
+    
+    if (!loaded) {
+      console.log(`Chunk ${i + 1} not found in any format, stopping chunk load`);
       break;
     }
+  }
+  
+  // If we couldn't load chunks, fall back to README
+  if (!loadedAny) {
+    console.log('No chunks could be loaded, will fall back to README');
+    allNumbers = [];
+    return false;
   }
   
   count = indexData.count || allNumbers.length;
@@ -132,9 +155,12 @@ async function loadChunkedData(indexData) {
     a = BigInt(lastTwo[0]);
     b = BigInt(lastTwo[1]);
     currentNumbers = allNumbers.slice(-45);
-    console.log(`Loaded ${allNumbers.length} numbers from ${numChunks} chunks`);
+    console.log(`Loaded ${allNumbers.length} numbers from chunks`);
     console.log(`Resuming from position ${count}`);
+    return true;
   }
+  
+  return false;
 }
 
 // Load state from GitHub
@@ -154,24 +180,28 @@ async function loadStateFromGitHub() {
     const content = Buffer.from(data.content, 'base64').toString('utf8');
     const parsed = JSON.parse(content);
     
-    // Check if data is chunked
+    // Check if data is chunked (old format)
     if (parsed.chunks && !parsed.numbers) {
-      console.log(`Found chunked data: ${parsed.chunks} chunks, loading...`);
-      await loadChunkedData(parsed);
-      return;
-    }
+      console.log(`Found chunked index: ${parsed.chunks} chunks, attempting to load...`);
+      const success = await loadChunkedData(parsed);
+      if (success) {
+        return;
+      }
+      // If chunk loading failed, fall through to README fallback
+      console.log('Chunk loading failed, falling back to README...');
+    } else if (parsed.numbers && parsed.numbers.length > 0) {
+      allNumbers = parsed.numbers;
+      count = parsed.count || allNumbers.length;
     
-    allNumbers = parsed.numbers || [];
-    count = parsed.count || allNumbers.length;
-    
-    if (allNumbers.length >= 2) {
-      const lastTwo = allNumbers.slice(-2);
-      a = BigInt(lastTwo[0]);
-      b = BigInt(lastTwo[1]);
-      currentNumbers = allNumbers.slice(-45);
-      console.log(`Loaded ${allNumbers.length} numbers from all.json`);
-      console.log(`Resuming from position ${count}`);
-      return;
+      if (allNumbers.length >= 2) {
+        const lastTwo = allNumbers.slice(-2);
+        a = BigInt(lastTwo[0]);
+        b = BigInt(lastTwo[1]);
+        currentNumbers = allNumbers.slice(-45);
+        console.log(`Loaded ${allNumbers.length} numbers from all.json`);
+        console.log(`Resuming from position ${count}`);
+        return;
+      }
     }
   } catch (error) {
     if (error.status !== 404) {
@@ -364,195 +394,106 @@ async function processQueue() {
   isProcessingQueue = false;
 }
 
-// Fetch existing numbers from GitHub to merge with new ones
-async function fetchExistingNumbers() {
+// Save all numbers - only append new ones to GitHub
+async function saveAllNumbersToGitHub(saveCount, numbers) {
+  let existingNumbers = [];
+  let allJsonSha;
+  
+  // First, fetch existing data from GitHub
   try {
     const { data } = await octokit.repos.getContent({
       owner: REPO_OWNER,
       repo: REPO_NAME,
       path: ALL_NUMBERS_PATH,
     });
+    allJsonSha = data.sha;
     const content = Buffer.from(data.content, 'base64').toString('utf8');
     const parsed = JSON.parse(content);
     
-    if (parsed.chunks) {
-      // Load chunked data
-      console.log('Fetching existing chunked data...');
-      const existingNumbers = [];
-      for (let i = 0; i < parsed.chunks; i++) {
-        try {
-          const { data: chunkData } = await octokit.repos.getContent({
-            owner: REPO_OWNER,
-            repo: REPO_NAME,
-            path: `chunks/chunk_${i}.json`,
-          });
-          const chunkContent = Buffer.from(chunkData.content, 'base64').toString('utf8');
-          const chunk = JSON.parse(chunkContent);
-          existingNumbers.push(...chunk.numbers);
-        } catch (e) {
-          console.error(`Error loading chunk ${i}:`, e.message);
-        }
-      }
-      return existingNumbers;
-    } else if (parsed.numbers) {
-      return parsed.numbers;
+    // Check if it's actual numbers array or just an old index file
+    if (parsed.numbers && Array.isArray(parsed.numbers) && parsed.numbers.length > 0) {
+      existingNumbers = parsed.numbers;
+      console.log(`Found ${existingNumbers.length} existing numbers on GitHub`);
+    } else if (parsed.chunks) {
+      // Old chunked index file - we'll overwrite it with actual numbers
+      console.log('Found old chunked index file, will overwrite with actual numbers');
     }
   } catch (error) {
-    if (error.status !== 404) {
-      console.error('Error fetching existing numbers:', error.message);
-    }
-  }
-  return [];
-}
-
-// Save all numbers, chunking if too large
-async function saveAllNumbersToGitHub(saveCount, numbers) {
-  // If we need to fetch existing data first (fell back from README)
-  if (allNumbersNeedsFetch && numbers.length < saveCount) {
-    console.log('Fetching existing numbers from GitHub to merge...');
-    const existingNumbers = await fetchExistingNumbers();
-    if (existingNumbers.length > 0) {
-      // Merge: use existing numbers up to where we have, then add new ones
-      const existingCount = existingNumbers.length;
-      const newNumbersStart = numbers.length > 0 ? saveCount - numbers.length : existingCount;
-      
-      if (newNumbersStart >= existingCount) {
-        // Existing data is older, append our new numbers
-        numbers = [...existingNumbers, ...numbers];
-        console.log(`Merged: ${existingNumbers.length} existing + ${numbers.length - existingNumbers.length} new = ${numbers.length} total`);
-      } else {
-        // Our numbers overlap, take existing up to overlap point then our new ones
-        numbers = [...existingNumbers.slice(0, newNumbersStart), ...numbers];
-        console.log(`Merged with overlap: ${numbers.length} total numbers`);
+    if (error.status === 404) {
+      console.log('No existing all.json, creating new file');
+    } else {
+      // File exists but is corrupted, get its SHA so we can overwrite
+      console.log('Existing all.json is corrupted, will overwrite');
+      try {
+        const { data } = await octokit.repos.getContent({
+          owner: REPO_OWNER,
+          repo: REPO_NAME,
+          path: ALL_NUMBERS_PATH,
+        });
+        allJsonSha = data.sha;
+      } catch (e) {
+        // Ignore
       }
     }
-    allNumbersNeedsFetch = false;
-    // Update allNumbers with merged data
-    allNumbers = numbers;
   }
 
+  // Determine which numbers are new (not already on GitHub)
+  let numbersToSave;
+  if (existingNumbers.length > 0) {
+    // Only append numbers that are new
+    const existingCount = existingNumbers.length;
+    if (numbers.length > existingCount) {
+      // We have more numbers than GitHub, append the new ones
+      const newNumbers = numbers.slice(existingCount);
+      numbersToSave = [...existingNumbers, ...newNumbers];
+      console.log(`Appending ${newNumbers.length} new numbers to ${existingCount} existing`);
+    } else {
+      // GitHub has same or more, just use what's there
+      numbersToSave = existingNumbers;
+      console.log(`No new numbers to append (GitHub: ${existingCount}, local: ${numbers.length})`);
+    }
+  } else {
+    // No existing data, save all our numbers
+    numbersToSave = numbers;
+    console.log(`Saving ${numbers.length} numbers (fresh file)`);
+  }
+
+  // Format JSON with multiple lines for readability
   const allNumbersData = {
     count: saveCount,
     lastUpdated: new Date().toISOString(),
-    totalNumbers: numbers.length,
-    numbers: numbers
+    totalNumbers: numbersToSave.length,
+    numbers: numbersToSave
   };
   
+  // Pretty print with 2-space indent
   const jsonContent = JSON.stringify(allNumbersData, null, 2);
   const contentSize = Buffer.byteLength(jsonContent, 'utf8');
   
-  // If file is too large, save in chunks
-  if (contentSize > MAX_FILE_SIZE) {
-    console.log(`all.json too large (${(contentSize / 1024 / 1024).toFixed(2)}MB), saving in chunks...`);
-    await saveInChunks(saveCount, numbers);
-  } else {
-    // Save as single file
-    let allJsonSha;
-    try {
-      const { data } = await octokit.repos.getContent({
-        owner: REPO_OWNER,
-        repo: REPO_NAME,
-        path: ALL_NUMBERS_PATH,
-      });
-      allJsonSha = data.sha;
-    } catch (error) {
-      if (error.status !== 404) throw error;
-    }
-
-    await octokit.repos.createOrUpdateFileContents({
-      owner: REPO_OWNER,
-      repo: REPO_NAME,
-      path: ALL_NUMBERS_PATH,
-      message: `Update all numbers: ${saveCount} total`,
-      content: Buffer.from(jsonContent).toString('base64'),
-      ...(allJsonSha && { sha: allJsonSha }),
-    });
-
-    console.log(`Saved all.json to GitHub: ${numbers.length} numbers`);
-  }
-}
-
-// Save numbers in chunk files when too large
-async function saveInChunks(saveCount, numbers) {
-  const numChunks = Math.ceil(numbers.length / CHUNK_SIZE);
+  console.log(`all.json size: ${(contentSize / 1024 / 1024).toFixed(2)}MB`);
   
-  // Save index file
-  const indexData = {
-    count: saveCount,
-    lastUpdated: new Date().toISOString(),
-    totalNumbers: numbers.length,
-    chunks: numChunks,
-    chunkSize: CHUNK_SIZE
-  };
-  
-  let indexSha;
-  try {
-    const { data } = await octokit.repos.getContent({
-      owner: REPO_OWNER,
-      repo: REPO_NAME,
-      path: ALL_NUMBERS_PATH,
-    });
-    indexSha = data.sha;
-  } catch (error) {
-    if (error.status !== 404) throw error;
+  // GitHub has 100MB limit, warn if approaching
+  if (contentSize > 90 * 1024 * 1024) {
+    console.log('Warning: all.json approaching GitHub size limit. Consider archiving old data.');
   }
-
+  
+  // Save the file
   await octokit.repos.createOrUpdateFileContents({
     owner: REPO_OWNER,
     repo: REPO_NAME,
     path: ALL_NUMBERS_PATH,
-    message: `Update index: ${saveCount} numbers in ${numChunks} chunks`,
-    content: Buffer.from(JSON.stringify(indexData, null, 2)).toString('base64'),
-    ...(indexSha && { sha: indexSha }),
+    message: `Update all numbers: ${saveCount} total (${numbersToSave.length} stored)`,
+    content: Buffer.from(jsonContent).toString('base64'),
+    ...(allJsonSha && { sha: allJsonSha }),
   });
-  
-  console.log(`Saved index file, now saving ${numChunks} chunks...`);
 
-  // Save each chunk
-  for (let i = 0; i < numChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const end = Math.min((i + 1) * CHUNK_SIZE, numbers.length);
-    const chunkNumbers = numbers.slice(start, end);
-    
-    const chunkData = {
-      chunk: i + 1,
-      totalChunks: numChunks,
-      startIndex: start,
-      endIndex: end - 1,
-      numbers: chunkNumbers
-    };
-    
-    const chunkPath = `chunks/chunk_${String(i + 1).padStart(4, '0')}.json`;
-    
-    let chunkSha;
-    try {
-      const { data } = await octokit.repos.getContent({
-        owner: REPO_OWNER,
-        repo: REPO_NAME,
-        path: chunkPath,
-      });
-      chunkSha = data.sha;
-    } catch (error) {
-      if (error.status !== 404) throw error;
-    }
-
-    await octokit.repos.createOrUpdateFileContents({
-      owner: REPO_OWNER,
-      repo: REPO_NAME,
-      path: chunkPath,
-      message: `Update chunk ${i + 1}/${numChunks}`,
-      content: Buffer.from(JSON.stringify(chunkData)).toString('base64'),
-      ...(chunkSha && { sha: chunkSha }),
-    });
-    
-    console.log(`Saved chunk ${i + 1}/${numChunks}`);
-    
-    // Small delay between chunks to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
+  console.log(`Saved all.json to GitHub: ${numbersToSave.length} numbers`);
   
-  console.log(`All ${numChunks} chunks saved successfully`);
+  // Update local allNumbers with merged data
+  allNumbers = numbersToSave;
+  allNumbersNeedsFetch = false;
 }
+
 
 // Compute next Fibonacci number
 function computeNext() {
