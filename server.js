@@ -136,99 +136,64 @@ function chunkNeedsResplit(chunkData) {
   return Buffer.byteLength(content, 'utf8') > MAX_CHUNK_BYTES;
 }
 
-// Load chunked data from multiple files
+// Load chunked data - only load the LAST chunk to save RAM
+// We only need the last 2 numbers to continue the Fibonacci sequence
 async function loadChunkedData(indexData) {
-  // Handle both old format (chunks = number) and new format (chunks = array)
   const chunks = Array.isArray(indexData.chunks) ? indexData.chunks : [];
-  const numChunks = chunks.length || indexData.chunks || 0;
+  const numChunks = chunks.length;
   
   if (numChunks === 0) {
     console.log('No chunks to load');
     return false;
   }
   
-  allNumbers = [];
-  let loadedAny = false;
+  console.log(`Found ${numChunks} chunks, loading only the last one to save RAM...`);
   
-  console.log(`Attempting to load ${numChunks} chunk files...`);
+  // Get the last chunk info
+  const lastChunk = chunks[numChunks - 1];
+  const chunkPath = lastChunk?.path || `chunks/chunk_${numChunks - 1}.json`;
   
-  for (let i = 0; i < numChunks; i++) {
-    // Determine chunk path from index data or try common formats
-    let chunkPath;
-    if (Array.isArray(indexData.chunks) && indexData.chunks[i]?.path) {
-      chunkPath = indexData.chunks[i].path;
-    } else {
-      chunkPath = `chunks/chunk_${i}.json`;
+  try {
+    // Use raw URL to load (no size limit)
+    const rawUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/${chunkPath}`;
+    const response = await fetch(rawUrl);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
     
-    let loaded = false;
+    const content = await response.text();
+    const chunkData = JSON.parse(content);
     
-    // First try using raw GitHub URL (no size limit)
-    try {
-      console.log(`Trying to load chunk from raw URL: ${chunkPath}`);
-      const rawUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/${chunkPath}`;
-      const response = await fetch(rawUrl);
-      if (response.ok) {
-        const content = await response.text();
-        const chunkData = JSON.parse(content);
-        allNumbers.push(...chunkData.numbers);
-        console.log(`Loaded chunk ${i + 1}/${numChunks} from raw URL: ${chunkData.numbers.length} numbers`);
-        loaded = true;
-        loadedAny = true;
-      } else {
-        console.log(`  Raw URL failed: ${response.status}`);
-      }
-    } catch (error) {
-      console.log(`  Raw URL error: ${error.message}`);
+    if (!chunkData.numbers || chunkData.numbers.length < 2) {
+      console.log('Last chunk has insufficient numbers');
+      return false;
     }
     
-    // Fall back to API if raw URL failed
-    if (!loaded) {
-      try {
-        console.log(`Trying API fallback for: ${chunkPath}`);
-        const { data } = await octokit.repos.getContent({
-          owner: REPO_OWNER,
-          repo: REPO_NAME,
-          path: chunkPath,
-        });
-        const content = Buffer.from(data.content, 'base64').toString('utf8');
-        const chunkData = JSON.parse(content);
-        allNumbers.push(...chunkData.numbers);
-        console.log(`Loaded chunk ${i + 1}/${numChunks} from API: ${chunkData.numbers.length} numbers`);
-        loaded = true;
-        loadedAny = true;
-      } catch (error) {
-        console.log(`  API failed: ${error.status || error.message}`);
-      }
-    }
-    
-    if (!loaded) {
-      console.log(`Chunk ${i + 1} not found, stopping chunk load`);
-      break;
-    }
-  }
-  
-  // If we couldn't load chunks, fall back to README
-  if (!loadedAny) {
-    console.log('No chunks could be loaded, will fall back to README');
-    allNumbers = [];
-    return false;
-  }
-  
-  // Use totalNumbers from index or count from loaded data
-  count = indexData.computedCount || indexData.totalNumbers || allNumbers.length;
-  
-  if (allNumbers.length >= 2) {
-    const lastTwo = allNumbers.slice(-2);
+    // Get the last two numbers to continue the sequence
+    const lastTwo = chunkData.numbers.slice(-2);
     a = BigInt(lastTwo[0]);
     b = BigInt(lastTwo[1]);
-    currentNumbers = allNumbers.slice(-45);
-    console.log(`Loaded ${allNumbers.length} numbers from ${numChunks} chunks`);
+    
+    // Set count from index data
+    count = indexData.computedCount || indexData.totalNumbers || 0;
+    
+    // Only keep last 45 numbers for display
+    currentNumbers = chunkData.numbers.slice(-45);
+    
+    // Keep allNumbers empty - we don't need all of them in memory
+    // We'll only save NEW numbers going forward
+    allNumbers = [];
+    
+    console.log(`Loaded last chunk (${chunkData.numbers.length} numbers)`);
     console.log(`Resuming from position ${count}`);
+    console.log(`RAM saved by not loading ${numChunks - 1} previous chunks`);
+    
     return true;
+  } catch (error) {
+    console.log(`Failed to load last chunk: ${error.message}`);
+    return false;
   }
-  
-  return false;
 }
 
 // Load state from GitHub
@@ -482,13 +447,12 @@ async function processQueue() {
 }
 
 // Save all numbers using chunked files to avoid GitHub size limits
-// Each chunk holds up to CHUNK_SIZE numbers, saved as chunks/chunk_0.json, chunks/chunk_1.json, etc.
-// all.json is an index file pointing to all chunks
-async function saveAllNumbersToGitHub(saveCount, numbers) {
+// Now optimized: allNumbers only contains NEW numbers since startup
+// We append these to the last chunk or create new chunks as needed
+async function saveAllNumbersToGitHub(saveCount, newNumbers) {
   // First, get the current index to know what chunks exist
   let indexData = { chunks: [], totalNumbers: 0, lastChunkCount: 0 };
   let indexSha;
-  let chunksAreCorrupted = false;
   
   try {
     const { data } = await octokit.repos.getContent({
@@ -501,208 +465,55 @@ async function saveAllNumbersToGitHub(saveCount, numbers) {
     const parsed = JSON.parse(content);
     
     if (parsed.chunks && Array.isArray(parsed.chunks)) {
-      // Verify at least the first chunk is readable and check if it needs resplitting
-      if (parsed.chunks.length > 0) {
-        try {
-          const testPath = parsed.chunks[0].path;
-          // Try raw URL first for large files
-          const rawUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/${testPath}`;
-          const response = await fetch(rawUrl);
-          if (response.ok) {
-            const chunkContent = await response.text();
-            const chunkData = JSON.parse(chunkContent);
-            
-            // Check if chunk is too large (by byte size) and needs resplitting
-            if (chunkNeedsResplit(chunkData)) {
-              console.log(`Chunk 0 is too large (${(Buffer.byteLength(chunkContent, 'utf8') / 1024).toFixed(0)}KB > ${MAX_CHUNK_BYTES / 1024}KB), needs resplitting`);
-              chunksAreCorrupted = true; // Will trigger full resave with smaller chunks
-            } else {
-              indexData = parsed;
-              console.log(`Found ${indexData.chunks.length} existing chunks with ${indexData.totalNumbers} numbers`);
-            }
-          } else {
-            throw new Error(`HTTP ${response.status}`);
-          }
-        } catch (chunkError) {
-          console.log('Existing chunks are corrupted or unreadable, will reset and save fresh:', chunkError.message);
-          chunksAreCorrupted = true;
-          indexData = { chunks: [], totalNumbers: 0, lastChunkCount: 0 };
-        }
-      } else {
-        indexData = parsed;
-      }
-    } else if (parsed.numbers && Array.isArray(parsed.numbers)) {
-      // Old single-file format - need to migrate
-      console.log(`Migrating ${parsed.numbers.length} numbers from old format to chunks`);
-      const oldNumbers = parsed.numbers;
-      for (let i = 0; i < oldNumbers.length; i += CHUNK_SIZE) {
-        const chunkNumbers = oldNumbers.slice(i, i + CHUNK_SIZE);
-        const chunkIndex = Math.floor(i / CHUNK_SIZE);
-        await saveChunk(chunkIndex, chunkNumbers);
-        indexData.chunks.push({
-          index: chunkIndex,
-          path: `chunks/chunk_${chunkIndex}.json`,
-          count: chunkNumbers.length,
-          startPosition: i + 1,
-          endPosition: i + chunkNumbers.length
-        });
-      }
-      indexData.totalNumbers = oldNumbers.length;
-      indexData.lastChunkCount = oldNumbers.length % CHUNK_SIZE || CHUNK_SIZE;
+      indexData = parsed;
+      console.log(`Found ${indexData.chunks.length} existing chunks with ${indexData.totalNumbers} numbers`);
     }
   } catch (error) {
     if (error.status === 404) {
       console.log('No existing all.json index, creating new chunked storage');
     } else {
       console.log('Error reading index:', error.message);
-      chunksAreCorrupted = true;
     }
   }
 
-  // If chunks are corrupted or need resplitting, save all numbers from scratch with size-based chunks
-  if (chunksAreCorrupted) {
-    console.log(`Saving all ${numbers.length} numbers fresh (resetting corrupted/oversized data)`);
+  // If no new numbers to save, skip
+  if (!newNumbers || newNumbers.length === 0) {
+    console.log('No new numbers to save');
+    return;
+  }
+
+  console.log(`Saving ${newNumbers.length} new numbers`);
+
+  // Split new numbers by size
+  const newChunks = splitNumbersBySize(newNumbers);
+  let startPosition = indexData.totalNumbers + 1;
+  
+  // Save each new chunk
+  for (let i = 0; i < newChunks.length; i++) {
+    const chunkNumbers = newChunks[i];
+    const chunkIndex = indexData.chunks.length; // Next chunk index
     
-    // Try to delete old chunk files first (up to 100 to be safe)
-    for (let i = 0; i < 100; i++) {
-      const chunkPath = `chunks/chunk_${i}.json`;
-      try {
-        const { data } = await octokit.repos.getContent({
-          owner: REPO_OWNER,
-          repo: REPO_NAME,
-          path: chunkPath,
-        });
-        // Delete the file
-        await octokit.repos.deleteFile({
-          owner: REPO_OWNER,
-          repo: REPO_NAME,
-          path: chunkPath,
-          message: `Delete old chunk ${i}`,
-          sha: data.sha,
-        });
-        console.log(`Deleted old chunk ${i}`);
-        await new Promise(resolve => setTimeout(resolve, 500)); // Rate limit
-      } catch (e) {
-        // File doesn't exist - we're done
-        if (e.status === 404) break;
-      }
-    }
+    await saveChunk(chunkIndex, chunkNumbers);
     
-    // Small delay after deletions
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Split numbers by byte size, not count
-    const numberChunks = splitNumbersBySize(numbers);
-    console.log(`Splitting ${numbers.length} numbers into ${numberChunks.length} size-based chunks`);
-    
-    indexData = { chunks: [], totalNumbers: 0, lastChunkCount: 0 };
-    let totalProcessed = 0;
-    
-    for (let chunkIndex = 0; chunkIndex < numberChunks.length; chunkIndex++) {
-      const chunkNumbers = numberChunks[chunkIndex];
-      await saveChunk(chunkIndex, chunkNumbers);
-      indexData.chunks.push({
-        index: chunkIndex,
-        path: `chunks/chunk_${chunkIndex}.json`,
-        count: chunkNumbers.length,
-        startPosition: totalProcessed + 1,
-        endPosition: totalProcessed + chunkNumbers.length
-      });
-      totalProcessed += chunkNumbers.length;
-      
-      // Rate limit to avoid GitHub API issues
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    indexData.totalNumbers = numbers.length;
-    indexData.lastChunkCount = numberChunks[numberChunks.length - 1]?.length || 0;
-    indexData.lastUpdated = new Date().toISOString();
-    indexData.computedCount = saveCount;
-    
-    const indexContent = JSON.stringify(indexData, null, 2);
-    
-    await octokit.repos.createOrUpdateFileContents({
-      owner: REPO_OWNER,
-      repo: REPO_NAME,
-      path: ALL_NUMBERS_PATH,
-      message: `Reset chunks: ${indexData.totalNumbers} numbers in ${indexData.chunks.length} chunks`,
-      content: Buffer.from(indexContent).toString('base64'),
-      ...(indexSha && { sha: indexSha }),
+    indexData.chunks.push({
+      index: chunkIndex,
+      path: `chunks/chunk_${chunkIndex}.json`,
+      count: chunkNumbers.length,
+      startPosition: startPosition,
+      endPosition: startPosition + chunkNumbers.length - 1
     });
     
-    console.log(`Saved fresh: ${indexData.totalNumbers} numbers in ${indexData.chunks.length} chunks`);
-    return;
-  }
-
-  // Determine how many new numbers we have
-  const existingCount = indexData.totalNumbers;
-  const newNumbersCount = numbers.length - existingCount;
-  
-  if (newNumbersCount <= 0) {
-    console.log(`No new numbers to save (have ${numbers.length}, GitHub has ${existingCount})`);
-    return;
-  }
-
-  console.log(`Saving ${newNumbersCount} new numbers (${existingCount} -> ${numbers.length})`);
-
-  // Get the new numbers to save
-  const newNumbers = numbers.slice(existingCount);
-  
-  // Determine which chunk to append to or create
-  let currentChunkIndex = indexData.chunks.length > 0 ? indexData.chunks.length - 1 : 0;
-  let currentChunkCount = indexData.lastChunkCount || 0;
-  let numbersProcessed = 0;
-  
-  while (numbersProcessed < newNumbers.length) {
-    // How many numbers can fit in current chunk?
-    const spaceInChunk = CHUNK_SIZE - currentChunkCount;
+    startPosition += chunkNumbers.length;
     
-    if (spaceInChunk > 0 && currentChunkCount > 0) {
-      // Append to existing chunk
-      const numbersToAdd = newNumbers.slice(numbersProcessed, numbersProcessed + spaceInChunk);
-      await appendToChunk(currentChunkIndex, numbersToAdd);
-      
-      numbersProcessed += numbersToAdd.length;
-      currentChunkCount += numbersToAdd.length;
-      
-      // Update chunk info in index
-      if (indexData.chunks[currentChunkIndex]) {
-        indexData.chunks[currentChunkIndex].count = currentChunkCount;
-        indexData.chunks[currentChunkIndex].endPosition = existingCount + numbersProcessed;
-      }
-      
-      console.log(`Appended ${numbersToAdd.length} numbers to chunk ${currentChunkIndex}`);
-    }
-    
-    // If chunk is full or we have more numbers, create new chunks
-    if (currentChunkCount >= CHUNK_SIZE && numbersProcessed < newNumbers.length) {
-      currentChunkIndex++;
-      currentChunkCount = 0;
-    }
-    
-    // Create new chunk if needed
-    if (currentChunkCount === 0 && numbersProcessed < newNumbers.length) {
-      const numbersForNewChunk = newNumbers.slice(numbersProcessed, numbersProcessed + CHUNK_SIZE);
-      await saveChunk(currentChunkIndex, numbersForNewChunk);
-      
-      indexData.chunks.push({
-        index: currentChunkIndex,
-        path: `chunks/chunk_${currentChunkIndex}.json`,
-        count: numbersForNewChunk.length,
-        startPosition: existingCount + numbersProcessed + 1,
-        endPosition: existingCount + numbersProcessed + numbersForNewChunk.length
-      });
-      
-      numbersProcessed += numbersForNewChunk.length;
-      currentChunkCount = numbersForNewChunk.length;
-      
-      console.log(`Created chunk ${currentChunkIndex} with ${numbersForNewChunk.length} numbers`);
+    // Rate limit
+    if (i < newChunks.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
 
-  // Update index file
-  indexData.totalNumbers = existingCount + newNumbersCount;
-  indexData.lastChunkCount = currentChunkCount;
+  // Update index
+  indexData.totalNumbers += newNumbers.length;
+  indexData.lastChunkCount = newChunks[newChunks.length - 1]?.length || 0;
   indexData.lastUpdated = new Date().toISOString();
   indexData.computedCount = saveCount;
   
@@ -712,12 +523,15 @@ async function saveAllNumbersToGitHub(saveCount, numbers) {
     owner: REPO_OWNER,
     repo: REPO_NAME,
     path: ALL_NUMBERS_PATH,
-    message: `Update index: ${indexData.totalNumbers} numbers in ${indexData.chunks.length} chunks`,
+    message: `Add ${newNumbers.length} numbers: now ${indexData.totalNumbers} total in ${indexData.chunks.length} chunks`,
     content: Buffer.from(indexContent).toString('base64'),
     ...(indexSha && { sha: indexSha }),
   });
 
-  console.log(`Saved all.json index: ${indexData.totalNumbers} numbers in ${indexData.chunks.length} chunks`);
+  console.log(`Saved: ${indexData.totalNumbers} total numbers in ${indexData.chunks.length} chunks`);
+  
+  // Clear saved numbers from memory
+  allNumbers = [];
 }
 
 // Save a new chunk file
@@ -766,65 +580,6 @@ async function saveChunk(chunkIndex, numbers) {
     console.error(`Error saving chunk ${chunkIndex}: ${error.status} - ${error.message}`);
     throw error;
   }
-}
-
-// Append numbers to an existing chunk (or recreate if corrupted)
-async function appendToChunk(chunkIndex, newNumbers, existingNumbers = []) {
-  const chunkPath = `chunks/chunk_${chunkIndex}.json`;
-  
-  let sha;
-  let currentNumbers = existingNumbers;
-  
-  // Try to get existing chunk
-  try {
-    const { data } = await octokit.repos.getContent({
-      owner: REPO_OWNER,
-      repo: REPO_NAME,
-      path: chunkPath,
-    });
-    sha = data.sha;
-    
-    const existingContent = Buffer.from(data.content, 'base64').toString('utf8');
-    const chunkData = JSON.parse(existingContent);
-    currentNumbers = chunkData.numbers || [];
-  } catch (error) {
-    if (error.status === 404) {
-      console.log(`Chunk ${chunkIndex} doesn't exist, creating new`);
-    } else if (error.message?.includes('JSON')) {
-      console.log(`Chunk ${chunkIndex} is corrupted, will overwrite`);
-      // Get SHA to overwrite corrupted file
-      try {
-        const { data } = await octokit.repos.getContent({
-          owner: REPO_OWNER,
-          repo: REPO_NAME,
-          path: chunkPath,
-        });
-        sha = data.sha;
-      } catch (e) {}
-    } else {
-      throw error;
-    }
-  }
-  
-  // Append new numbers
-  const allNumbers = [...currentNumbers, ...newNumbers];
-  
-  const chunkData = {
-    chunkIndex,
-    count: allNumbers.length,
-    numbers: allNumbers
-  };
-  
-  const content = JSON.stringify(chunkData, null, 2);
-  
-  await octokit.repos.createOrUpdateFileContents({
-    owner: REPO_OWNER,
-    repo: REPO_NAME,
-    path: chunkPath,
-    message: `Update chunk ${chunkIndex}: ${allNumbers.length} numbers`,
-    content: Buffer.from(content).toString('base64'),
-    ...(sha && { sha }),
-  });
 }
 
 
