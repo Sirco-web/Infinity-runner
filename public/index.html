@@ -134,6 +134,194 @@
             display: none;
         }
 
+        /* Settings Modal */
+        .settings-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .settings-modal.show {
+            display: flex;
+        }
+
+        .settings-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            border-radius: 20px;
+            max-width: 450px;
+            width: 90%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+        }
+
+        .settings-content h2 {
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .setting-group {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+        }
+
+        .setting-group h3 {
+            margin-bottom: 12px;
+            font-size: 1.1em;
+        }
+
+        .setting-group p {
+            font-size: 0.85em;
+            opacity: 0.8;
+            margin-bottom: 12px;
+        }
+
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
+        }
+
+        .setting-row label {
+            flex: 1;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.2);
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: #10b981;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        .refresh-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .refresh-option {
+            padding: 8px 16px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+        }
+
+        .refresh-option:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .refresh-option.active {
+            background: #10b981;
+            border-color: #10b981;
+        }
+
+        .custom-refresh {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .custom-refresh input {
+            width: 70px;
+            padding: 8px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 0.9em;
+        }
+
+        .custom-refresh input:focus {
+            outline: none;
+            border-color: #10b981;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            margin-left: 10px;
+        }
+
+        .status-indicator.on {
+            background: #10b981;
+        }
+
+        .status-indicator.off {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .close-settings {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin-top: 20px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .close-settings:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
         /* Main Grid Layout */
         .main-grid {
             display: grid;
@@ -470,6 +658,7 @@
                 <div class="connection-status disconnected" id="status">Connecting...</div>
                 <button class="save-btn" id="manual-save-btn">💾 Save</button>
                 <button class="toggle-btn active" id="toggle-live">👁 Live Numbers</button>
+                <button class="toggle-btn" id="settings-btn">⚙️ Settings</button>
             </div>
         </div>
 
@@ -558,6 +747,55 @@
         </div>
     </div>
 
+    <!-- Settings Modal -->
+    <div class="settings-modal" id="settingsModal">
+        <div class="settings-content">
+            <h2>⚙️ Settings</h2>
+            
+            <div class="setting-group">
+                <h3>☕ Keep Screen Awake
+                    <span class="status-indicator off" id="wakeLockStatus">OFF</span>
+                </h3>
+                <p>Prevents your device from going to sleep while viewing this page.</p>
+                <div class="setting-row">
+                    <label>Enable Wake Lock</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="wakeLockToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="setting-group">
+                <h3>🔄 Auto Refresh
+                    <span class="status-indicator off" id="refreshStatus">OFF</span>
+                </h3>
+                <p>Automatically refresh the page at set intervals to ensure connection stays alive.</p>
+                <div class="setting-row">
+                    <label>Enable Auto Refresh</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="autoRefreshToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="refresh-options" id="refreshOptions">
+                    <button class="refresh-option" data-minutes="1">1m</button>
+                    <button class="refresh-option" data-minutes="5">5m</button>
+                    <button class="refresh-option active" data-minutes="10">10m</button>
+                    <button class="refresh-option" data-minutes="30">30m</button>
+                    <button class="refresh-option" data-minutes="60">1h</button>
+                </div>
+                <div class="custom-refresh">
+                    <span>Custom:</span>
+                    <input type="number" id="customRefreshMinutes" min="1" max="1440" placeholder="min">
+                    <button class="refresh-option" id="applyCustomRefresh">Apply</button>
+                </div>
+            </div>
+            
+            <button class="close-settings" id="closeSettings">Close</button>
+        </div>
+    </div>
+
     <div class="save-indicator" id="saveIndicator">
         ✓ Saved to GitHub
     </div>
@@ -593,6 +831,7 @@
         let history = [];
         let serverStartTime = null;
         let lastSaveTime = null;
+        let autoSaveStartTime = null; // Tracks when current auto-save cycle started
         let uptimeInterval = null;
         let liveVisible = true;
 
@@ -645,6 +884,7 @@
                     history = data.last45 || [];
                     serverStartTime = new Date(data.serverStartTime);
                     lastSaveTime = new Date(data.lastSaveTime);
+                    autoSaveStartTime = new Date(data.autoSaveStartTime);
                 
                     // Update server specs
                     if (data.serverSpecs) {
@@ -676,6 +916,10 @@
                     renderHistory();
                 } else if (data.type === 'save') {
                     lastSaveTime = new Date(data.lastSaveTime);
+                    // Only update auto-save timer if this was an auto-save (has autoSaveStartTime)
+                    if (data.autoSaveStartTime) {
+                        autoSaveStartTime = new Date(data.autoSaveStartTime);
+                    }
                     showSaveIndicator();
                 }
             };
@@ -776,10 +1020,10 @@
                     uptimeEl.textContent = `${minutes}m`;
                 }
                 
-                // Update next save time
-                if (lastSaveTime) {
-                    const timeSinceLastSave = now - lastSaveTime;
-                    const nextSaveIn = Math.max(0, 5 * 60 * 1000 - timeSinceLastSave);
+                // Update next save time (based on auto-save cycle, not manual saves)
+                if (autoSaveStartTime) {
+                    const timeSinceAutoSave = now - autoSaveStartTime;
+                    const nextSaveIn = Math.max(0, 5 * 60 * 1000 - timeSinceAutoSave);
                     const minutesUntilSave = Math.ceil(nextSaveIn / 60000);
                     nextSaveEl.textContent = `${minutesUntilSave}m`;
                 }
@@ -810,6 +1054,192 @@
                 saveIndicatorEl.classList.remove('show');
             }, 3000);
         }
+
+        // ============ SETTINGS FUNCTIONALITY ============
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsModal = document.getElementById('settingsModal');
+        const closeSettingsBtn = document.getElementById('closeSettings');
+        const wakeLockToggle = document.getElementById('wakeLockToggle');
+        const wakeLockStatus = document.getElementById('wakeLockStatus');
+        const autoRefreshToggle = document.getElementById('autoRefreshToggle');
+        const refreshStatus = document.getElementById('refreshStatus');
+        const refreshOptions = document.getElementById('refreshOptions');
+        const customRefreshInput = document.getElementById('customRefreshMinutes');
+        const applyCustomRefreshBtn = document.getElementById('applyCustomRefresh');
+
+        let wakeLock = null;
+        let autoRefreshInterval = null;
+        let refreshMinutes = 10; // Default 10 minutes
+
+        // Open/close settings modal
+        settingsBtn.addEventListener('click', () => {
+            settingsModal.classList.add('show');
+        });
+
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsModal.classList.remove('show');
+        });
+
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) {
+                settingsModal.classList.remove('show');
+            }
+        });
+
+        // ============ WAKE LOCK FUNCTIONALITY ============
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLockStatus.textContent = 'ON';
+                    wakeLockStatus.classList.remove('off');
+                    wakeLockStatus.classList.add('on');
+                    console.log('Wake Lock activated');
+                    
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Wake Lock released');
+                        updateWakeLockUI(false);
+                    });
+                } else {
+                    alert('Wake Lock API is not supported in this browser');
+                    wakeLockToggle.checked = false;
+                }
+            } catch (err) {
+                console.error('Wake Lock error:', err);
+                alert('Could not activate Wake Lock: ' + err.message);
+                wakeLockToggle.checked = false;
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock) {
+                wakeLock.release();
+                wakeLock = null;
+            }
+            updateWakeLockUI(false);
+        }
+
+        function updateWakeLockUI(isOn) {
+            if (isOn) {
+                wakeLockStatus.textContent = 'ON';
+                wakeLockStatus.classList.remove('off');
+                wakeLockStatus.classList.add('on');
+            } else {
+                wakeLockStatus.textContent = 'OFF';
+                wakeLockStatus.classList.remove('on');
+                wakeLockStatus.classList.add('off');
+            }
+        }
+
+        wakeLockToggle.addEventListener('change', () => {
+            if (wakeLockToggle.checked) {
+                requestWakeLock();
+            } else {
+                releaseWakeLock();
+            }
+            localStorage.setItem('wakeLockEnabled', wakeLockToggle.checked);
+        });
+
+        // Re-acquire wake lock when page becomes visible again
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible' && wakeLockToggle.checked && !wakeLock) {
+                await requestWakeLock();
+            }
+        });
+
+        // ============ AUTO REFRESH FUNCTIONALITY ============
+        function startAutoRefresh() {
+            stopAutoRefresh();
+            autoRefreshInterval = setInterval(() => {
+                console.log('Auto-refreshing page...');
+                location.reload();
+            }, refreshMinutes * 60 * 1000);
+            
+            refreshStatus.textContent = `${refreshMinutes}m`;
+            refreshStatus.classList.remove('off');
+            refreshStatus.classList.add('on');
+            console.log(`Auto-refresh enabled: every ${refreshMinutes} minutes`);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+            refreshStatus.textContent = 'OFF';
+            refreshStatus.classList.remove('on');
+            refreshStatus.classList.add('off');
+        }
+
+        autoRefreshToggle.addEventListener('change', () => {
+            if (autoRefreshToggle.checked) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+            localStorage.setItem('autoRefreshEnabled', autoRefreshToggle.checked);
+        });
+
+        // Refresh interval options
+        refreshOptions.querySelectorAll('.refresh-option[data-minutes]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                refreshOptions.querySelectorAll('.refresh-option').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                refreshMinutes = parseInt(btn.dataset.minutes);
+                localStorage.setItem('refreshMinutes', refreshMinutes);
+                
+                if (autoRefreshToggle.checked) {
+                    startAutoRefresh();
+                }
+            });
+        });
+
+        // Custom refresh time
+        applyCustomRefreshBtn.addEventListener('click', () => {
+            const customMinutes = parseInt(customRefreshInput.value);
+            if (customMinutes && customMinutes >= 1 && customMinutes <= 1440) {
+                refreshOptions.querySelectorAll('.refresh-option').forEach(b => b.classList.remove('active'));
+                refreshMinutes = customMinutes;
+                localStorage.setItem('refreshMinutes', refreshMinutes);
+                customRefreshInput.value = '';
+                
+                if (autoRefreshToggle.checked) {
+                    startAutoRefresh();
+                }
+                
+                alert(`Auto-refresh set to ${customMinutes} minute(s)`);
+            } else {
+                alert('Please enter a valid number between 1 and 1440 minutes');
+            }
+        });
+
+        // ============ RESTORE SETTINGS FROM LOCALSTORAGE ============
+        (function restoreSettings() {
+            // Restore wake lock setting
+            const savedWakeLock = localStorage.getItem('wakeLockEnabled');
+            if (savedWakeLock === 'true') {
+                wakeLockToggle.checked = true;
+                requestWakeLock();
+            }
+
+            // Restore refresh settings
+            const savedRefreshMinutes = localStorage.getItem('refreshMinutes');
+            if (savedRefreshMinutes) {
+                refreshMinutes = parseInt(savedRefreshMinutes);
+                refreshOptions.querySelectorAll('.refresh-option').forEach(btn => {
+                    btn.classList.remove('active');
+                    if (btn.dataset.minutes === savedRefreshMinutes) {
+                        btn.classList.add('active');
+                    }
+                });
+            }
+
+            const savedAutoRefresh = localStorage.getItem('autoRefreshEnabled');
+            if (savedAutoRefresh === 'true') {
+                autoRefreshToggle.checked = true;
+                startAutoRefresh();
+            }
+        })();
     </script>
 </body>
 </html>
